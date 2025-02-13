@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use Elasticsearch\ClientBuilder;
+use App\Models\Configuration;
+
 
 class ElasticsearchService
 {
