@@ -2,7 +2,8 @@
 
 namespace App\Services;
 
-use Elasticsearch\ClientBuilder;
+use Elastic\Elasticsearch\ClientBuilder;
+
 use App\Models\Configuration;
 
 
