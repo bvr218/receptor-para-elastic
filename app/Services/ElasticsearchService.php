@@ -23,9 +23,10 @@ class ElasticsearchService
         }
 
         $this->client = ClientBuilder::create()
-            ->setHosts([$host])
-            ->setBasicAuthentication($user, $password)
-            ->build();
+                ->setHosts(["https://" . $host->value])
+                ->setSSLVerification(false)
+                ->setBasicAuthentication($user->value, $password->value)
+                ->build();
     }
 
     public function indexRequest($data)
