@@ -9,7 +9,7 @@ Route::get('/', function () {
 });
 
 
-Route::post('/', [ApiRequestController::class, 'Request'])->withoutMiddleware(\App\Http\Middleware\VerifyCsrfToken::class);
-Route::put('/', [ApiRequestController::class, 'Request'])->withoutMiddleware(\App\Http\Middleware\VerifyCsrfToken::class);
-Route::get('/', [ApiRequestController::class, 'Request']);
-Route::delete('/', [ApiRequestController::class, 'Request'])->withoutMiddleware(\App\Http\Middleware\VerifyCsrfToken::class);
+Route::post('/', [ApiRequestController::class, 'captureRequest'])->withoutMiddleware(\App\Http\Middleware\VerifyCsrfToken::class);
+Route::put('/', [ApiRequestController::class, 'captureRequest'])->withoutMiddleware(\App\Http\Middleware\VerifyCsrfToken::class);
+Route::get('/', [ApiRequestController::class, 'captureRequest']);
+Route::delete('/', [ApiRequestController::class, 'captureRequest'])->withoutMiddleware(\App\Http\Middleware\VerifyCsrfToken::class);
