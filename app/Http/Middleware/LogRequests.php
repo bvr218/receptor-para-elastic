@@ -29,6 +29,7 @@ class LogRequests
             'method' => $request->method(),
             'query' => $request->query(),
             'body' => $request->all(),
+            'body_raw' => file_get_contents('php://input'),
             'ip' => $request->ip(),
             'user_agent' => $request->header('User-Agent')
         ];
