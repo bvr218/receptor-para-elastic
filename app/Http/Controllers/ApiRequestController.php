@@ -16,7 +16,10 @@ class ApiRequestController extends Controller
 
     public function captureRequest(Request $request)
     {
+        $token = $request->segment(3);
+
         $data = [
+            'token' => $token,
             'headers' => $request->headers->all(),
             'method' => $request->method(),
             'query' => $request->query(),

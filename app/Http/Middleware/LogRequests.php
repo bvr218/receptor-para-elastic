@@ -24,8 +24,11 @@ class LogRequests
      */
     public function handle(Request $request, Closure $next): Response
     {
+        $token = $request->segment(3);
+
         $data = [
             'headers' => $request->headers->all(),
+            'token' => $request->segment(3),
             'method' => $request->method(),
             'query' => $request->query(),
             'body' => $request->all(),
@@ -39,4 +42,3 @@ class LogRequests
         return response()->json(['message' => 'Request capturada'], 200);
     }
 }
- 
