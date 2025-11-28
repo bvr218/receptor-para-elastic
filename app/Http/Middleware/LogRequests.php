@@ -6,15 +6,18 @@ use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 use App\Services\ElasticsearchService;
-
+use App\Services\DatabaseService;
 
 class LogRequests
 {
     protected $elasticsearchService;
+    protected $databaseService;
 
-    public function __construct(ElasticsearchService $elasticsearchService)
+
+    public function __construct(ElasticsearchService $elasticsearchService, DatabaseService $databaseService)
     {
         $this->elasticsearchService = $elasticsearchService;
+        $this->databaseService = $databaseService;
     }
 
     /**
@@ -25,6 +28,7 @@ class LogRequests
     public function handle(Request $request, Closure $next): Response
     {
         $token = $request->segment(3);
+        $parsing_data=$this->databaseService->dataParsing($token, $request->all());
 
         $data = [
             'headers' => $request->headers->all(),
@@ -32,6 +36,7 @@ class LogRequests
             'method' => $request->method(),
             'query' => $request->query(),
             'body' => $request->all(),
+            'body_calculated' => $parsing_data,
             'body_raw' => file_get_contents('php://input'),
             'ip' => $request->ip(),
             'user_agent' => $request->header('User-Agent')
