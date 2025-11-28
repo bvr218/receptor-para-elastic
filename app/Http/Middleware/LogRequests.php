@@ -29,7 +29,7 @@ class LogRequests
     {
         $token = $request->segment(3);
         $parsing_data=$this->databaseService->dataParsing($token, $request->all());
-        dd($parsing_data);
+
         $data = [
             'headers' => $request->headers->all(),
             'token' => $request->segment(3),
