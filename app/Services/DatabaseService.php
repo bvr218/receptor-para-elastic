@@ -31,9 +31,9 @@ class DatabaseService
         'WES-02' => 'handleWes2',
         'WES-03' => 'handleWes2',
 
-        'MPS2'   => 'handleMps2',
-        'MPS-2'  => 'handleMps2',
-        'MPS-6'  => 'handleMps2',
+        'MPS2'   => 'handleTER21',
+        'MPS-2'  => 'handleTER21',
+        'MPS-6'  => 'handleTER21',
 
         '5TE'    => 'handle5te',
         '5T-E'   => 'handle5te',
