@@ -9,8 +9,12 @@ if (!function_exists('searchInListOfDicts')) {
                 $keyStr = is_array($key) ? json_encode($key) : (string)$key;
                 $valueStr = is_array($value) ? json_encode($value) : (string)$value;
 
-                if (strpos($keyStr, $searchStr) !== false || strpos($valueStr, $searchStr) !== false) {
-                    $results[] = ['key' => $key, 'value' => $value, 'dict' => $dictionary];
+                if ($keyStr === $searchStr || $valueStr === $searchStr) {
+                    $results[] = [
+                        'key'   => $key,
+                        'value' => $value,
+                        'dict'  => $dictionary
+                    ];
                 }
             }
         }

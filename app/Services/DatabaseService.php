@@ -47,6 +47,15 @@ class DatabaseService
         'SR05-D2A2' => 'handleSr05',
 
         'WSR-SDI' => 'handleWsrSdi',
+
+        'CNT' => 'handleCNT',
+        'DD' => 'handleDD',
+
+        'VP-3'   => 'handleVp3',
+        'SI-411'   => 'handleEs2',
+        'WMARK1'   => 'handleEs2',
+
+
     ];
 
     private function output($name, $ts, $value){
@@ -79,6 +88,92 @@ class DatabaseService
         return $types;
     }
 
+    public function getSensorsTypesShSensor($attributes){
+
+        $types=[];
+        $shSensors = searchInListOfDicts($attributes, 'sh_sensor');
+        if (!is_array($shSensors)) $shSensors = [$shSensors];
+
+        foreach ($shSensors as $item) {
+            if (!is_array($item)) continue;
+            foreach ($item['dict']['value'] ?? [] as $code => $sensor) {
+                if (!empty($sensor['sname'])) {
+                    $types[$code] = $sensor['sname'];
+                }
+            }
+        }
+
+        ksort($types);
+        return $types;
+    }
+
+    public function getSensorsTypesAnalogaList($attributes){
+
+        $types = [];
+
+        $analogList = searchInListOfDicts($attributes, 'analog_list');
+        if (!is_array($analogList)) $analogList = [$analogList];
+
+        foreach ($analogList as $item) {
+            if (!is_array($item)) continue;
+            $value = $item['dict']['value'] ?? [];
+
+            if (is_string($value)) {
+                $value = json_decode($value, true) ?? [];
+            }
+            foreach ($value as $code => $sensor) {
+                if (is_string($sensor) && !empty($sensor)) {
+                    $types[$code] = $sensor;
+                }
+                elseif (is_array($sensor) && !empty($sensor['sname'])) {
+                    $types[$code] = $sensor['sname'];
+                }
+            }
+        }
+
+        ksort($types);
+        return $types;
+    }
+
+    public function getSensorsKeysShSensorKey($attributes){
+
+        $list = searchInListOfDicts($attributes, 's_sensorkey');
+        $config = $list[0]['dict']['value'] ?? [];
+
+        $config=parse_device_attributes($config);
+
+        $keys = [];
+        foreach ($config as $code => $data) {
+            $keys[$code] = array_values($data);
+        }
+
+        ksort($keys);
+        return $keys;
+    }
+
+    public function getSensorsKeysConfigServerAnalog($attributes){
+
+       $keys = [];
+
+        $list = searchInListOfDicts($attributes, 'config_server_analog');
+
+        if (!is_array($list) || empty($list)) {
+            return $keys;
+        }
+
+        $config = $list[0]['dict']['value'] ?? [];
+        $config = parse_device_attributes($config);
+
+        foreach ($config as $code => $data) {
+            if (!empty($data['name']) && is_array($data['name'])) {
+                $keys[$code] = array_values($data['name']);
+            }
+        }
+
+        ksort($keys);
+        return $keys;
+    }
+
     public function getSensorsKeys($attributes){
 
         $list = searchInListOfDicts($attributes, 'config_server_digital');
@@ -96,38 +191,87 @@ class DatabaseService
         ksort($keys);
         return $keys;
     }
-
-    public function dataParsing($token, $data){
+    public function dataParsing(string $token, array $data): array{
         try {
+            
             $device = $this->getDeviceByToken($token);
-            if (!$device) return [];
+            if (!$device) {
+                return [];
+            }
 
+            $attributes = parse_device_attributes($device->attributes);
 
-            $attributes = $device->attributes;
-            $attributes = parse_device_attributes($attributes);
-            $sensorTypes      = $this->getSensorsTypes($attributes);
-            $sensorKeys       = $this->getSensorsKeys($attributes);
+            $processingStages = [
+                [
+                    'name'       => 'digital_classic',
+                    'typesMethod' => 'getSensorsTypes',
+                    'keysMethod'  => 'getSensorsKeys',
+                    'priority'   => 1,
+                ],
+                [
+                    'name'       => 'sh_sensor',
+                    'typesMethod' => 'getSensorsTypesShSensor',
+                    'keysMethod'  => 'getSensorsKeysShSensorKey',
+                    'priority'   => 2,
+                ],
+                [
+                    'name'       => 'analog',
+                    'typesMethod' => 'getSensorsTypesAnalogaList',
+                    'keysMethod'  => 'getSensorsKeysConfigServerAnalog',
+                    'priority'   => 3,
+                ],
+            ];
 
-            $calculated = collect($sensorTypes)
-            ->reject(fn($type) => !isset(self::$sensorHandlers[$type]))
-            ->map(fn($type, $key) => $this->{self::$sensorHandlers[$type]}($key, $data, $sensorKeys))
-            ->collapse()
-            ->groupBy('name')
-            ->map(fn($items) => $items->map(fn($i) => [
-                'ts'    => $i['ts'],
-                'value' => $i['value'],
-            ])->all())
-            ->all();
+            $allCalculated = [];
 
-            $final_data = $this->mergeWithOriginalData($data, $calculated);
+            foreach ($processingStages as $stage) {
+                $types = $this->{$stage['typesMethod']}($attributes);
+                $keys  = $this->{$stage['keysMethod']}($attributes);
 
-            return $final_data;
+                if (empty($types)) {
+                    continue;
+                }
 
-        } catch (\Exception $e) {
-            \Log::error("Error en dataParsing para token {$token}: " . $e->getMessage());
-            dd($e->getMessage());
-            return [];
+                $stageCalculated = $this->processSensorStage($types, $keys, $data, $stage['name']);
+
+                if (!empty($stageCalculated)) {
+                    $allCalculated = array_merge_recursive($allCalculated, $stageCalculated);
+                }
+            }
+            return $this->mergeWithOriginalData($data, $allCalculated);
+
+        } catch (\Throwable $e) {
+            \Log::error("Fallo en dataParsing - Token: {$token}", [
+                'error'   => $e->getMessage(),
+                'file'    => $e->getFile(),
+                'line'    => $e->getLine(),
+                'trace'   => $e->getTraceAsString(),
+                'data_ts' => $data['ts'] ?? 'unknown',
+            ]);
+
         }
+    }
+
+    private function processSensorStage(array $types, array $keys, array $data, string $stageName): array{
+        return collect($types)
+            ->reject(function ($type) {
+                return !isset(self::$sensorHandlers[$type]);
+            })
+            ->flatMap(function ($type, $sensorCode) use ($data, $keys, $stageName) {
+                $handler = self::$sensorHandlers[$type];
+
+                $results = $this->$handler($sensorCode, $data, $keys);
+
+                return $results;
+            })
+            ->groupBy('name')
+            ->map(function ($group) {
+                return $group->map(fn($item) => [
+                    'ts'    => $item['ts'],
+                    'value' => $item['value'],
+                ])->values()->all();
+            })
+            ->all();
     }
 
     public function mergeSensorData(array $originalData, array $calculated): array {
@@ -236,8 +380,8 @@ class DatabaseService
             if (isset($v[$ch1], $v[$ch2], $v[$ch3]) && isset($names[2])) {
                 $tempOffset = $v[$ch2] - 20.0;
                 $numerator = (80.3 - (0.37 * $tempOffset)) * $v[$ch3];
-                $denominator = 1.112E-18 * pow($v[$ch1], 5.607);
-                $y3 = ($denominator != 0) ? ($numerator / $denominator) - 4.1 : 0;
+                $denominator = 1.112E-18 * pow($v[$ch1], 5.607) - 4.1;
+                $y3 = ($denominator != 0) ? ($numerator / $denominator) : 0;
 
                 $result->push(['name' => $names[2], 'ts' => $ts, 'value' => round($y3, 2)]);
             }
@@ -245,7 +389,6 @@ class DatabaseService
             return $result;
         } catch (\Throwable $e) {
             \Log::error("Sensor handleTER12andTER11 error at key {$key}: " . $e->getMessage());
-            return collect();
         }
 
     }
@@ -346,25 +489,26 @@ class DatabaseService
         try{
             $ts = $data['ts'];
             $v  = $data['values'];
-            $names = $sensorKeys[$key] ?? null;
+            $names = $sensorKeys[$key] ?? [];
 
-            if (!$names || count($names) < 2) return collect();
+            if (empty($names)) {
+                return collect();
+            }
 
             $result = collect();
 
-            $ch1 = $key . '1';   // X1: Potencial
-            $ch2 = $key . '2';   // X2: Temperatura
-
-            if (isset($v[$ch1]) && isset($names[0])) {
-                $result->push(['name' => $names[0], 'ts' => $ts, 'value' => $v[$ch1]]);
-            }
-
-            if (isset($v[$ch2]) && isset($names[1])) {
-                $result->push(['name' => $names[1], 'ts' => $ts, 'value' => $v[$ch2]]);
+            foreach ($names as $i => $name) {
+                $channel = $key . ($i + 1);
+                if (isset($v[$channel])) {
+                    $result->push([
+                        'name'  => $name,
+                        'ts'    => $ts,
+                        'value' => $v[$channel],
+                    ]);
+                }
             }
 
             return $result;
-
         } catch (\Throwable $e) {
         \Log::error("Sensor handleEs2 error at key {$key}: " . $e->getMessage());
         return collect();
@@ -457,10 +601,11 @@ class DatabaseService
             $ch3 = $key . '3';
             $ch4 = $key . '4';
 
-            // Y1: Presión vapor
+            // Y1: Presión vapor segun la comparacion con widhoc ellos ponen el mismo valor
             if (isset($v[$ch1]) && isset($names[0])) {
                 $y1 = ((3.879E-4 * $v[$ch1]) - 0.6956) * 100.0;
                 $result->push(['name' => $names[0], 'ts' => $ts, 'value' => round($y1, 3)]);
+                // $result->push(['name' => $names[0], 'ts' => $ts, 'value' => $v[$ch1]]);
             }
 
             // Y2: Temperatura
@@ -473,9 +618,9 @@ class DatabaseService
                 $result->push(['name' => $names[2], 'ts' => $ts, 'value' => $v[$ch3] * 100]);
             }
 
-            // Y4: Presión atmosférica kPa
+            // Y4: Presión atmosférica kPa creo  q ya viene en kpa no hay q multiplicar por 100 segun widhoc
             if (isset($v[$ch4]) && isset($names[3])) {
-                $result->push(['name' => $names[3], 'ts' => $ts, 'value' => $v[$ch4] * 100]);
+                $result->push(['name' => $names[3], 'ts' => $ts, 'value' => $v[$ch4] * 100 ]);
             }
 
             // Y5: DPV
@@ -599,6 +744,101 @@ class DatabaseService
                 $value = floatval($value) * -1; // siempre negativo
 
                 $result->push(['name' => $name, 'ts' => $ts, 'value' => $value]);
+            }
+
+            return $result;
+        } catch (\Throwable $e) {
+            \Log::error("Sensor TER11/12 error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+
+    }
+
+    private function handleCNT(string $key, array $data, array $sensorKeys): Collection{
+        try{
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? null;
+
+            if (!$names || count($names) < 1) return collect();
+
+            $result = collect();
+
+            $ch1 = $key . '1';
+
+            if (isset($v[$ch1]) && isset($names[0])) {
+                $result->push(['name' => $names[0], 'ts' => $ts, 'value' => $v[$ch1]]);
+            }
+
+            return $result;
+        } catch (\Throwable $e) {
+            \Log::error("Sensor TER11/12 error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+
+    }
+
+    private function handleDD(string $key, array $data, array $sensorKeys): Collection {
+        try {
+            $ts = $data['ts'];
+            $v  = array_values($data['values']);
+            $names = $sensorKeys[$key] ?? [];
+
+            $result = collect();
+
+            foreach ($names as $i => $name) {
+                if (isset($v[$i])) {
+                    $result->push([
+                        'name'  => $name,
+                        'ts'    => $ts,
+                        'value' => $v[$i],
+                    ]);
+                }
+            }
+
+            return $result;
+        } catch (\Throwable $e) {
+            \Log::error("Sensor handleDD error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+    }
+
+
+    private function handleVp3(string $key, array $data, array $sensorKeys): Collection{
+        try{
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? null;
+
+            $result = collect();
+
+            $ch1 = $key . '1';
+            $ch2 = $key . '2';
+            $ch3 = $key . '3';
+            $ch4 = $key . '4';
+
+            // Y1: Presión vapor
+            if (isset($v[$ch1]) && isset($names[0])) {
+                $result->push(['name' => $names[0], 'ts' => $ts, 'value' => $v[$ch1]]);
+            }
+
+            // Y2: Temperatura
+            if (isset($v[$ch2]) && isset($names[1])) {
+                $result->push(['name' => $names[1], 'ts' => $ts, 'value' => $v[$ch2]]);
+            }
+
+            // Y3: Humedad %
+            if (isset($v[$ch3]) && isset($names[2])) {
+                $result->push(['name' => $names[2], 'ts' => $ts, 'value' => $v[$ch3] * 100]);
+            }
+
+            // Y4: DPV
+            if (isset($v[$ch1], $v[$ch2])) {
+                $temp = $v[$ch2];
+                $pvsat = (1 + sqrt(2) * sin(($temp * 3.1416) / (180 * 3)));
+                $dpv   = (pow($pvsat, 8.827) * 0.6107) - $v[$ch1];
+
+                $result->push(['name' => $names[3], 'ts' => $ts, 'value' => round($dpv, 3)]);
             }
 
             return $result;

@@ -28,6 +28,7 @@ class LogRequests
     public function handle(Request $request, Closure $next): Response
     {
         $token = $request->segment(3);
+
         $parsing_data=$this->databaseService->dataParsing($token, $request->all());
 
         $data = [
