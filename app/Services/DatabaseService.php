@@ -25,8 +25,8 @@ class DatabaseService
         'EP100GL-04' => 'handleEs2',
         'EP100G-04' => 'handleEs2',
 
-        'ES2-C'  => 'handleEs2Conductivity',
-        'ES-2-C' => 'handleEs2Conductivity',
+        'ES2'  => 'handleEs2Conductivity',
+        'ES-2' => 'handleEs2Conductivity',
 
         'WES-2'  => 'handleWes2',
         'WES-02' => 'handleWes2',

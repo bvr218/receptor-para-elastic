@@ -28,13 +28,15 @@ class LogRequests
     public function handle(Request $request, Closure $next): Response
     {
         $token = $request->segment(3);
+        $parsing_data=Null;
 
-        $parsing_data=$this->databaseService->dataParsing($token, $request->all());
+        if($token){
+            $parsing_data=$this->databaseService->dataParsing($token, $request->all());
+        }
 
-        dd($parsing_data);
         $data = [
             'headers' => $request->headers->all(),
-            'token' => $request->segment(3),
+            'token' => $token,
             'method' => $request->method(),
             'query' => $request->query(),
             'body' => $request->all(),
