@@ -6,6 +6,8 @@ use Elastic\Elasticsearch\ClientBuilder;
 
 use App\Models\RemoteDevice;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Arr;
 
 class DatabaseService
 {
@@ -16,14 +18,13 @@ class DatabaseService
         'TR315H' => 'handleTr315',
         'TR310H' => 'handleTr315',
         'TR305N' => 'handleTr315',
-        'EP100G-08'  => 'handleEp100',
-        'EP100GL-08' => 'handleEp100',
 
-        // ES2: versión potencial
-        'ES2'    => 'handleEs2',
-        'ES-2'   => 'handleEs2',
 
-        // ES2: versión conductividad
+        'EP100G-08'  => 'handleEp100G',
+        'EP100GL-08' => 'handleEp100GL',
+        'EP100GL-04' => 'handleEs2',
+        'EP100G-04' => 'handleEs2',
+
         'ES2-C'  => 'handleEs2Conductivity',
         'ES-2-C' => 'handleEs2Conductivity',
 
@@ -40,11 +41,12 @@ class DatabaseService
 
         'VP4'    => 'handleVp4',
         'VP-4'   => 'handleVp4',
-        'ATM14'  => 'handleVp4',
 
+        'ATM14'  => 'handleVp4',
         'ATM22' => 'handleAtm22',
 
         'SR05-D2A2' => 'handleSr05',
+        'SR05-D2A2O' => 'handleSr05O',
 
         'WSR-SDI' => 'handleWsrSdi',
 
@@ -52,10 +54,32 @@ class DatabaseService
         'DD' => 'handleDD',
 
         'VP-3'   => 'handleVp3',
-        'SI-411'   => 'handleEs2',
-        'WMARK1'   => 'handleEs2',
+        'SI-411'   => 'handleEs2', #termoradiometros
+        'WMARK1'   => 'handleWMARK1',
 
+        'GL20M' => 'handleGl20m',
+        'GL120M' => 'handleGl120m',
 
+        'HAOSHI_PH' => 'handleHaoshiPh',
+
+        #iones
+        'CAS40D-PH' => 'handleCas40d',
+        'CAS40D-K' => 'handleCas40d',
+        'CAS40D-CL' => 'handleCas40d',
+        'CAS40D-PH' => 'handleCas40d',
+
+        'TYP8.3' => 'handleTyp83',
+
+        'GS-3' => 'handleGs3',
+        'GS3' => 'handleGs3',
+
+        'presostato_0_1MP' => 'handlePresostato01mp',
+        'presostato_0_1.6MP' => 'handlePresostato016mp',
+
+        #config server pulse
+        'caudal_agri' => 'handlePulseSensor',
+        'drain_agri' => 'handlePulseSensor',
+        'rain_meter' => 'handlePulseSensor',
     ];
 
     private function output($name, $ts, $value){
@@ -144,7 +168,7 @@ class DatabaseService
 
         $keys = [];
         foreach ($config as $code => $data) {
-            $keys[$code] = array_values($data);
+            $keys[$code] = $data['name'];
         }
 
         ksort($keys);
@@ -166,7 +190,7 @@ class DatabaseService
 
         foreach ($config as $code => $data) {
             if (!empty($data['name']) && is_array($data['name'])) {
-                $keys[$code] = array_values($data['name']);
+                $keys[$code] = $data['name'];
             }
         }
 
@@ -184,16 +208,99 @@ class DatabaseService
         $keys = [];
         foreach ($config as $code => $data) {
             if (isset($data['name'])) {
-                $keys[$code] = array_values($data['name']);
+                $keys[$code] = $data['name'];
             }
         }
 
         ksort($keys);
         return $keys;
     }
+
+    private function getSensorsTypesPulse(array $attributes): array
+    {
+        $config = searchInListOfDicts($attributes, 'config_server_pulse');
+
+        $config = $config[0]['dict']['value'] ?? [];
+
+        return collect($config)
+            ->mapWithKeys(function ($item, $key) {
+                return [$key => $item['type'] ?? null];
+            })
+            ->filter()
+            ->all();
+    }
+
+    private function getSensorsKeysConfigServerPulse(array $attributes): array
+    {
+        $config = searchInListOfDicts($attributes, 'config_server_pulse');
+
+        $config = $config[0]['dict']['value'] ?? [];
+
+        return collect($config)
+            ->mapWithKeys(function ($item, $key) {
+                return [$key => [$item['name'] ?? $key]];
+            })
+            ->all();
+    }
+
+    private function handlePulseSensor(string $key, array $data, array $sensorKeys, array $sensorTypes): array
+    {
+        try {
+            $ts = $data['ts'] ?? null;
+            $v  = $data['values'] ?? [];
+
+            $names = $sensorKeys[$key] ?? null;
+            $sensorType = $sensorTypes[$key] ?? null;
+
+            if (!isset($v[$key]) || !$names || !isset($names[0]) || !$sensorType) {
+                return [];
+            }
+
+            $x = $v[$key];
+            $y = null;
+
+            switch ($sensorType) {
+                case 'caudal_agri':
+                    $rp  = $v[$key . '_rp']  ?? 1;
+                    $ltr = $v[$key . '_ltr'] ?? 1;
+                    $nge = $v[$key . '_nge'] ?? 1;
+                    $y = (60 / $rp) * $ltr * $x / $nge;
+                    break;
+
+                case 'drain_agri':
+                    $ml = $v[$key . '_ml'] ?? 1;
+                    $y = $ml * $x;
+                    break;
+
+                case 'rain_meter':
+                    $ml = $v[$key . '_ml'] ?? 1;
+                    $y = $x * $ml * 0.001 * 50;
+                    break;
+            }
+
+            if ($y !== null) {
+                $name = $names[0];
+                return [
+                    $name => [
+                        [
+                            'ts'    => $ts,
+                            'value' => $y
+                        ]
+                    ]
+                ];
+            }
+
+            return [];
+
+        } catch (\Throwable $e) {
+            Log::error("Sensor pulse error at key {$key}: " . $e->getMessage());
+            return [];
+        }
+    }
+
     public function dataParsing(string $token, array $data): array{
         try {
-            
+
             $device = $this->getDeviceByToken($token);
             if (!$device) {
                 return [];
@@ -220,6 +327,7 @@ class DatabaseService
                     'keysMethod'  => 'getSensorsKeysConfigServerAnalog',
                     'priority'   => 3,
                 ],
+
             ];
 
             $allCalculated = [];
@@ -227,6 +335,7 @@ class DatabaseService
             foreach ($processingStages as $stage) {
                 $types = $this->{$stage['typesMethod']}($attributes);
                 $keys  = $this->{$stage['keysMethod']}($attributes);
+
 
                 if (empty($types)) {
                     continue;
@@ -238,17 +347,20 @@ class DatabaseService
                     $allCalculated = array_merge_recursive($allCalculated, $stageCalculated);
                 }
             }
-            return $this->mergeWithOriginalData($data, $allCalculated);
+
+            $pulseTypes = $this->getSensorsTypesPulse($attributes);
+            $pulseKeys  = $this->getSensorsKeysConfigServerPulse($attributes);
+
+            foreach ($pulseKeys as $key => $names) {
+                $pulseData= $this->handlePulseSensor($key, $data, $pulseKeys, $pulseTypes);
+                $allCalculated = array_merge_recursive($allCalculated, $pulseData);
+            }
+
+           return $this->mergeWithOriginalData($data, $allCalculated);
 
         } catch (\Throwable $e) {
-            \Log::error("Fallo en dataParsing - Token: {$token}", [
-                'error'   => $e->getMessage(),
-                'file'    => $e->getFile(),
-                'line'    => $e->getLine(),
-                'trace'   => $e->getTraceAsString(),
-                'data_ts' => $data['ts'] ?? 'unknown',
-            ]);
-
+            dd(str($e));
+            return [];
         }
     }
 
@@ -259,7 +371,6 @@ class DatabaseService
             })
             ->flatMap(function ($type, $sensorCode) use ($data, $keys, $stageName) {
                 $handler = self::$sensorHandlers[$type];
-
                 $results = $this->$handler($sensorCode, $data, $keys);
 
                 return $results;
@@ -299,19 +410,29 @@ class DatabaseService
 
     private function mergeWithOriginalData(array $original, array $calculated): array{
         $ts = $original['ts'] ?? null;
-        $base = collect($original['values'] ?? [])
-            ->map(fn($value, $key) => [
+
+        $base = [];
+        foreach ($original['values'] ?? [] as $sensorName => $value) {
+            $base[$sensorName][$ts] = [
                 'ts'    => $ts,
                 'value' => $value,
-            ])
-            ->groupBy(fn($item, $key) => $key)
-            ->toArray();
+            ];
+        }
 
         foreach ($calculated as $sensorName => $records) {
             if (!isset($base[$sensorName])) {
                 $base[$sensorName] = [];
             }
-            $base[$sensorName] = array_merge($base[$sensorName], $records);
+            foreach ($records as $record) {
+                $recordTs = $record['ts'] ?? null;
+                if ($recordTs !== null) {
+                    $base[$sensorName][$recordTs] = $record;
+                }
+            }
+        }
+
+        foreach ($base as $sensorName => $recordsByTs) {
+            $base[$sensorName] = array_values($recordsByTs);
         }
 
         return $base;
@@ -330,163 +451,236 @@ class DatabaseService
     private function handleTER21(string $key, array $data, array $sensorKeys): Collection{
         try{
             $ts = $data['ts'];
-            $values = $data['values'];
+            $v= $data['values'];
             $names = $sensorKeys[$key] ?? null;
 
-            if (!$names || count($names) < 2) return collect();
+            $result = collect();
 
-            return collect([
-                [$names[0], $values[$key . '1'] ?? null],
-                [$names[1], $values[$key . '2'] ?? null],
-            ])
-            ->filter(fn($v) => $v[1] !== null)
-            ->map(fn($item) => [
-                'name'  => $item[0],
-                'ts'    => $ts,
-                'value' => $item[1],
-            ]);
+            foreach ($names as $idx => $name) {
+                $channel = $key . ($idx);
+
+                if (!isset($v[$channel])) {
+                    continue;
+                }
+
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $v[$channel],
+                ]);
+            }
+
+            return $result;
 
          } catch (\Throwable $e) {
-            \Log::error("Sensor TER11/12 error at key {$key}: " . $e->getMessage());
+            Log::error("Sensor TER11/12 error at key {$key}: " . $e->getMessage());
             return collect();
         }
 
     }
 
     private function handleTER12andTER11(string $key, array $data, array $sensorKeys): Collection {
-        try{
-            $ts = $data['ts'];
-            $v  = $data['values'];
-            $names = $sensorKeys[$key] ?? null;
+        try {
 
-            $result = collect();
+        $ts = $data['ts'];
+        $v  = $data['values'];
+        $names = $sensorKeys[$key] ?? [];
 
-            $ch1 = $key . '1'; // raw
-            $ch2 = $key . '2'; // temp
-            $ch3 = $key . '3'; // raw para conductividad
+        if (empty($names)) return collect();
 
-            // Y1: Contenido volumétrico
-            if (isset($v[$ch1]) && isset($names[0])) {
-                $y1 = ((3.879E-4 * $v[$ch1]) - 0.6956) * 100;
-                $result->push(['name' => $names[0], 'ts' => $ts, 'value' => round($y1, 3)]);
+        $result = collect();
+
+        foreach ($names as $idx => $name) {
+
+            $channel = $key . $idx;
+
+            if (!isset($v[$channel])) {
+                continue;
             }
 
-            // Y2: Temperatura
-            if (isset($v[$ch2]) && isset($names[1])) {
-                $result->push(['name' => $names[1], 'ts' => $ts, 'value' => $v[$ch2]]);
+            $value = null;
+
+            if ($idx == 1) {
+                $value = ((3.879E-4 * $v[$channel]) - 0.6956) * 100;
+                $value = round($value, 3);
             }
 
-            // Y3: Conductividad (fórmula pesada)
-            if (isset($v[$ch1], $v[$ch2], $v[$ch3]) && isset($names[2])) {
-                $tempOffset = $v[$ch2] - 20.0;
-                $numerator = (80.3 - (0.37 * $tempOffset)) * $v[$ch3];
-                $denominator = 1.112E-18 * pow($v[$ch1], 5.607) - 4.1;
-                $y3 = ($denominator != 0) ? ($numerator / $denominator) : 0;
-
-                $result->push(['name' => $names[2], 'ts' => $ts, 'value' => round($y3, 2)]);
+            elseif ($idx == 2) {
+                $value = $v[$channel];
             }
 
-            return $result;
+            elseif ($idx == 3) {
+
+                $ch1 = $key . '1';
+                $ch2 = $key . '2';
+                $ch3 = $key . '3';
+
+                if (isset($v[$ch1], $v[$ch2], $v[$ch3])) {
+
+                    $tempOffset = $v[$ch2] - 20.0;
+                    $numerator = (80.3 - (0.37 * $tempOffset)) * $v[$ch3];
+                    $denominator = 1.112E-18 * pow($v[$ch1], 5.607) - 4.1;
+
+                    $value = ($denominator != 0)
+                        ? ($numerator / $denominator)
+                        : 0;
+
+                    $value = round($value, 2);
+                }
+            }
+
+            if ($value !== null) {
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $value,
+                ]);
+            }
+        }
+
+        return $result;
+
+
         } catch (\Throwable $e) {
-            \Log::error("Sensor handleTER12andTER11 error at key {$key}: " . $e->getMessage());
+            dd(str($e));
+            Log::error("Sensor handleTER12andTER11 error at key {$key}: " . $e->getMessage());
+            return collect();
         }
 
     }
 
     private function handleTr315(string $key, array $data, array $sensorKeys): Collection {
-        try{
+        try {
+
             $ts = $data['ts'];
             $v  = $data['values'];
-            $names = $sensorKeys[$key] ?? null;
+            $names = $sensorKeys[$key] ?? [];
 
-            if (!$names) return collect();
+            if (empty($names)) return collect();
 
             $result = collect();
 
-            $ch1 = $key . '1';   // X1 - Volumétrico
-            $ch2 = $key . '2';   // X2 - Temperatura
-            $ch3 = $key . '3';   // X3 - Permitividad
-            $ch4 = $key . '4';   // X4 - Conductividad
+            foreach ($names as $idx => $name) {
 
-            // Y1: Contenido volumétrico (%)
-            if (isset($v[$ch1]) && isset($names[0])) {
-                $result->push([
-                    'name'  => $names[0],
-                    'ts'    => $ts,
-                    'value' => $v[$ch1]   // Y1 = X1
-                ]);
-            }
+                $channel = $key . $idx;
 
-            // Y2: Temperatura (°C)
-            if (isset($v[$ch2]) && isset($names[1])) {
-                $result->push([
-                    'name'  => $names[1],
-                    'ts'    => $ts,
-                    'value' => $v[$ch2]   // Y2 = X2
-                ]);
-            }
+                if (!isset($v[$channel])) {
+                    continue;
+                }
 
-            // Y3: Permitividad relativa
-            if (isset($v[$ch3]) && isset($names[2]) ) {
-                $result->push([
-                    'name'  => $names[2],
-                    'ts'    => $ts,
-                    'value' => $v[$ch3]   // Y3 = X3
-                ]);
-            }
+                $value = null;
 
-            // Y4: Conductividad (uS/cm)
-            if (isset($v[$ch4]) && isset($names[3])) {
-                $result->push([
-                    'name'  => $names[3],
-                    'ts'    => $ts,
-                    'value' => $v[$ch4]   // Y4 = X4
-                ]);
-            }
+                switch ($idx) {
+                    // Y1 = X1
+                    case 1:
+                        $value = $v[$channel];
+                        break;
+                    // Y2 = X2
+                    case 2:
+                        $value = $v[$channel];
+                        break;
+                    // Y3 = X3
+                    case 3:
+                        $value = $v[$channel];
+                        break;
+                    // Y4 = X4 conductividad la division entre 1000 se maneja en 4egrowth
+                    case 4:
+                        $value = $v[$channel];
+                        break;
+                }
 
-            return $result;
-        } catch (\Throwable $e) {
-            \Log::error("Sensor handleTr315 error at key {$key}: " . $e->getMessage());
-            return collect();
-        }
-
-    }
-
-    private function handleEp100(string $key, array $data, array $sensorKeys): Collection{
-        try{
-            $ts = $data['ts'];
-            $v  = $data['values'];
-            $names = $sensorKeys[$key] ?? null;
-
-            // EP100G-08 → 8 variables (X1..X8)
-            if (!$names || count($names) < 8) return collect();
-
-            $result = collect();
-
-            for ($i = 1; $i <= 8; $i++) {
-                $channel = $key . $i;
-                $name    = $names[$i - 1];
-
-                if (isset($v[$channel])) {
+                if ($value !== null) {
                     $result->push([
                         'name'  => $name,
                         'ts'    => $ts,
-                        'value' => $v[$channel]
+                        'value' => $value
                     ]);
                 }
             }
 
-            return $result;
+        return $result;
         } catch (\Throwable $e) {
-            \Log::error("Sensor handleEp100 error at key {$key}: " . $e->getMessage());
+            Log::error("Sensor handleTr315 error at key {$key}: " . $e->getMessage());
             return collect();
         }
 
     }
 
+    private function handleEp100GL(string $key, array $data, array $sensorKeys): Collection{
+        try {
+
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
+
+            $result = collect();
+
+            foreach ($names as $idx => $name) {
+
+                $channel = $key . $idx;
+
+                if (!isset($v[$channel])) {
+                    continue;
+                }
+
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $v[$channel]
+                ]);
+            }
+
+            return $result;
+        } catch (\Throwable $e) {
+            Log::error("Sensor handleEp100 error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+
+    }
+
+
+    private function handleEp100G(string $key, array $data, array $sensorKeys): Collection{
+       try {
+
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
+
+            $result = collect();
+
+            foreach ($names as $idx => $name) {
+
+                $channel = $key . $idx;
+
+                if (!isset($v[$channel])) {
+                    continue;
+                }
+
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $v[$channel]
+                ]);
+            }
+
+            return $result;
+        } catch (\Throwable $e) {
+            Log::error("Sensor handleEp100 error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+
+    }
+
+
+    #mantiene los mismos valores
     private function handleEs2(string $key, array $data, array $sensorKeys): Collection{
 
-        try{
+        try {
+
             $ts = $data['ts'];
             $v  = $data['values'];
             $names = $sensorKeys[$key] ?? [];
@@ -497,20 +691,24 @@ class DatabaseService
 
             $result = collect();
 
-            foreach ($names as $i => $name) {
-                $channel = $key . ($i + 1);
-                if (isset($v[$channel])) {
-                    $result->push([
-                        'name'  => $name,
-                        'ts'    => $ts,
-                        'value' => $v[$channel],
-                    ]);
+            foreach ($names as $idx => $name) {
+
+                $channel = $key . $idx;
+
+                if (!isset($v[$channel])) {
+                    continue;
                 }
+
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $v[$channel],
+                ]);
             }
 
             return $result;
         } catch (\Throwable $e) {
-        \Log::error("Sensor handleEs2 error at key {$key}: " . $e->getMessage());
+        Log::error("Sensor handleEs2 error at key {$key}: " . $e->getMessage());
         return collect();
         }
 
@@ -520,238 +718,388 @@ class DatabaseService
         return $this->handleEs2($key, $data, $sensorKeys);
     }
 
-    private function handleEs2Conductivity(string $key, array $data, array $sensorKeys): Collection{
-        try{
+    private function handleEs2Conductivity(string $key, array $data, array $sensorKeys): Collection {
+
+        try {
+
             $ts = $data['ts'];
             $v  = $data['values'];
-            $names = $sensorKeys[$key] ?? null;
+            $names = $sensorKeys[$key] ?? [];
 
-            if (!$names || count($names) < 2) return collect();
+            if (empty($names)) return collect();
 
             $result = collect();
 
-            $ch1 = $key . '1';   // Conductividad
-            $ch2 = $key . '2';   // Temperatura
+            foreach ($names as $idx => $name) {
 
-            if (isset($v[$ch1]) && isset($names[0])) {
-                $result->push(['name' => $names[0], 'ts' => $ts, 'value' => $v[$ch1]]);
-            }
+                $channel = $key . $idx;
 
-            if (isset($v[$ch2]) && isset($names[1])) {
-                $result->push(['name' => $names[1], 'ts' => $ts, 'value' => $v[$ch2]]);
+                if (!isset($v[$channel])) {
+                    continue;
+                }
+
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $v[$channel]
+                ]);
             }
 
             return $result;
+
         } catch (\Throwable $e) {
-            \Log::error("Sensor TER11/12 error at key {$key}: " . $e->getMessage());
+            Log::error("Sensor TER11/12 error at key {$key}: " . $e->getMessage());
             return collect();
         }
-
     }
 
-    private function handle5te(string $key, array $data, array $sensorKeys): Collection{
-        try{
+    private function handle5te(string $key, array $data, array $sensorKeys): Collection {
+
+        try {
+
             $ts = $data['ts'];
             $v  = $data['values'];
-            $names = $sensorKeys[$key] ?? null;
+            $names = $sensorKeys[$key] ?? [];
 
-            if (!$names) return collect();
+            if (empty($names)) return collect();
 
             $result = collect();
 
-            $ch1 = $key . '1';   // X1: raw del volumétrico
-            $ch2 = $key . '2';   // X2: EC
-            $ch3 = $key . '3';   // X3: Temperatura
+            foreach ($names as $idx => $name) {
 
-            // Y1: Contenido volumétrico %
-            if (isset($v[$ch1]) && isset($names[0])) {
-                $x = $v[$ch1];
-                $y1 = (-0.053 + (0.0292 * $x) - (0.00055 * pow($x, 2)) + (0.0000043 * pow($x, 3))) * 100;
-                $result->push(['name' => $names[0], 'ts' => $ts, 'value' => round($y1, 3)]);
-            }
+                $channel = $key . $idx;
 
-            // Y2: Conductividad eléctrica dS/m
-            if (isset($v[$ch2]) && isset($names[1])) {
-                $result->push(['name' => $names[1], 'ts' => $ts, 'value' => $v[$ch2] * 100]);
-            }
+                if (!isset($v[$channel])) {
+                    continue;
+                }
 
-            // Y3: Temperatura
-            if (isset($v[$ch3]) && isset($names[2])) {
-                $result->push(['name' => $names[2], 'ts' => $ts, 'value' => $v[$ch3]]);
+                $value = null;
+
+                switch ($idx) {
+
+                    // Y1: Contenido volumétrico
+                    case 1:
+                        $x = $v[$channel];
+                        $value = (-0.053 + (0.0292 * $x) - (0.00055 * pow($x, 2)) + (0.0000043 * pow($x, 3))) * 100;
+                        $value = round($value, 3);
+                        break;
+
+                    // Y2: Conductividad eléctrica
+                    case 2:
+                        $value = $v[$channel] * 100;
+                        break;
+
+                    // Y3: Temperatura
+                    case 3:
+                        $value = $v[$channel];
+                        break;
+                }
+
+                if ($value !== null) {
+                    $result->push([
+                        'name'  => $name,
+                        'ts'    => $ts,
+                        'value' => $value
+                    ]);
+                }
             }
 
             return $result;
+
         } catch (\Throwable $e) {
-            \Log::error("Sensor TER11/12 error at key {$key}: " . $e->getMessage());
+            Log::error("Sensor 5TE error at key {$key}: " . $e->getMessage());
             return collect();
         }
-
     }
 
-    private function handleVp4(string $key, array $data, array $sensorKeys): Collection{
-        try{
+   private function handleVp4(string $key, array $data, array $sensorKeys): Collection {
+
+        try {
+
             $ts = $data['ts'];
             $v  = $data['values'];
-            $names = $sensorKeys[$key] ?? null;
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
 
             $result = collect();
 
-            $ch1 = $key . '1';
-            $ch2 = $key . '2';
-            $ch3 = $key . '3';
-            $ch4 = $key . '4';
+            foreach ($names as $idx => $name) {
 
-            // Y1: Presión vapor segun la comparacion con widhoc ellos ponen el mismo valor
-            if (isset($v[$ch1]) && isset($names[0])) {
-                $y1 = ((3.879E-4 * $v[$ch1]) - 0.6956) * 100.0;
-                $result->push(['name' => $names[0], 'ts' => $ts, 'value' => round($y1, 3)]);
-                // $result->push(['name' => $names[0], 'ts' => $ts, 'value' => $v[$ch1]]);
-            }
+                $channel = $key . $idx;
 
-            // Y2: Temperatura
-            if (isset($v[$ch2]) && isset($names[1])) {
-                $result->push(['name' => $names[1], 'ts' => $ts, 'value' => $v[$ch2]]);
-            }
+                $value = null;
 
-            // Y3: Humedad relativa %
-            if (isset($v[$ch3]) && isset($names[2])) {
-                $result->push(['name' => $names[2], 'ts' => $ts, 'value' => $v[$ch3] * 100]);
-            }
+                switch ($idx) {
 
-            // Y4: Presión atmosférica kPa creo  q ya viene en kpa no hay q multiplicar por 100 segun widhoc
-            if (isset($v[$ch4]) && isset($names[3])) {
-                $result->push(['name' => $names[3], 'ts' => $ts, 'value' => $v[$ch4] * 100 ]);
-            }
+                    // Y1: Presión de vapor
+                    case 1:
+                        if (isset($v[$channel])) {
+                            $value = ((3.879E-4 * $v[$channel]) - 0.6956) * 100;
+                            $value = round($value, 3);
+                        }
+                        break;
 
-            // Y5: DPV
-            if (isset($v[$ch1], $v[$ch2])) {
-                $temp = $v[$ch2];
+                    // Y2: Temperatura
+                    case 2:
+                        if (isset($v[$channel])) {
+                            $value = $v[$channel];
+                        }
+                        break;
 
-                $pvsat = (1 + sqrt(2) * sin(($temp * 3.1416) / (180 * 3)));
-                $dpv   = (pow($pvsat, 8.827) * 0.6107) - $v[$ch1];
+                    // Y3: Humedad relativa
+                    case 3:
+                        if (isset($v[$channel])) {
+                            $value = $v[$channel] * 100;
+                        }
+                        break;
 
-                $result->push(['name' => $names[4], 'ts' => $ts, 'value' => round($dpv, 3)]);
+                    // Y4: Presión atmosférica
+                    case 4:
+                        if (isset($v[$channel])) {
+                            $value = $v[$channel] * 100;
+                        }
+                        break;
+
+                    // Y5: DPV (usa canal 1 y 2)
+                    case 5:
+
+                        $ch1 = $key.'1';
+                        $ch2 = $key.'2';
+
+                        if (isset($v[$ch1], $v[$ch2])) {
+
+                            $temp = $v[$ch2];
+
+                            $pvsat = (1 + sqrt(2) * sin(($temp * 3.1416) / (180 * 3)));
+                            $dpv   = (pow($pvsat, 8.827) * 0.6107) - $v[$ch1];
+
+                            $value = round($dpv, 3);
+                        }
+
+                        break;
+                }
+
+                if ($value !== null) {
+                    $result->push([
+                        'name'  => $name,
+                        'ts'    => $ts,
+                        'value' => $value
+                    ]);
+                }
             }
 
             return $result;
+
         } catch (\Throwable $e) {
-            \Log::error("Sensor TER11/12 error at key {$key}: " . $e->getMessage());
+            Log::error("Sensor VP4 error at key {$key}: " . $e->getMessage());
             return collect();
         }
-
     }
 
     private function handleAtm22(string $key, array $data, array $sensorKeys): Collection {
-        try{
+
+        try {
+
             $ts = $data['ts'];
             $v  = $data['values'];
-            $names = $sensorKeys[$key] ?? null;
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
 
             $result = collect();
 
-            $ch1 = $key . '1';
-            $ch2 = $key . '2';
-            $ch3 = $key . '3';
-            $ch4 = $key . '4';
+            foreach ($names as $idx => $name) {
 
-            // Y1: Velocidad viento
-            if (isset($v[$ch1]) && isset($names[0])) {
-                $y1 = ($v[$ch1] > 0) ? $v[$ch1] : 0;
-                $result->push(['name' => $names[0], 'ts' => $ts, 'value' => $y1]);
-            }
+                $channel = $key . $idx;
 
-            // Y2: Dirección viento
-            if (isset($v[$ch2]) && isset($names[1])) {
-                $result->push(['name' => $names[1], 'ts' => $ts, 'value' => $v[$ch2]]);
-            }
+                if (!isset($v[$channel])) {
+                    continue;
+                }
 
-            // Y3: Ráfagas
-            if (isset($v[$ch3]) && isset($names[2])) {
-                $y3 = ($v[$ch3] > 0) ? $v[$ch3] : 0;
-                $result->push(['name' => $names[2], 'ts' => $ts, 'value' => $y3]);
-            }
+                $value = null;
 
-            // Y4: Temp aire
-            if (isset($v[$ch4]) && isset($names[3])) {
-                $result->push(['name' => $names[3], 'ts' => $ts, 'value' => $v[$ch4]]);
-            }
+                switch ($idx) {
 
-            return $result;
-        } catch (\Throwable $e) {
-            \Log::error("Sensor TER11/12 error at key {$key}: " . $e->getMessage());
-            return collect();
-        }
+                    // Y1: Velocidad viento
+                    case 1:
+                        $value = ($v[$channel] > 0) ? $v[$channel] : 0;
+                        break;
 
+                    // Y2: Dirección viento
+                    case 2:
+                        $value = $v[$channel];
+                        break;
 
-    }
+                    // Y3: Ráfagas
+                    case 3:
+                        $value = ($v[$channel] > 0) ? $v[$channel] : 0;
+                        break;
 
-    private function handleSr05(string $key, array $data, array $sensorKeys): Collection{
-        try{
-            $ts = $data['ts'];
-            $v  = $data['values'];
-            $names = $sensorKeys[$key] ?? null;
+                    // Y4: Temperatura aire
+                    case 4:
+                        $value = $v[$channel];
+                        break;
+                }
 
-            $result = collect();
-            $ch1 = $key . '1';
-
-            if (isset($v[$ch1])) {
-                $x = $v[$ch1];
-                $y1 = ($x > 0) ? ((0.5 * $x) - 400.0) : 0;
-                $result->push(['name' => $names[0], 'ts' => $ts, 'value' => round($y1, 3)]);
+                if ($value !== null) {
+                    $result->push([
+                        'name'  => $name,
+                        'ts'    => $ts,
+                        'value' => $value
+                    ]);
+                }
             }
 
             return $result;
 
         } catch (\Throwable $e) {
-            \Log::error("Sensor TER11/12 error at key {$key}: " . $e->getMessage());
+            Log::error("Sensor ATM22 error at key {$key}: " . $e->getMessage());
             return collect();
         }
     }
 
-    private function handleWsrSdi(string $key, array $data, array $sensorKeys): Collection{
-        try{
+    private function handleSr05(string $key, array $data, array $sensorKeys): Collection {
+
+        try {
+
             $ts = $data['ts'];
             $v  = $data['values'];
-            $names = $sensorKeys[$key] ?? null;
+            $names = $sensorKeys[$key] ?? [];
 
-            if (!$names) return collect();
+            if (empty($names)) return collect();
 
             $result = collect();
 
-            for ($i = 1; $i <= 4; $i++) {
-                $ch = $key . $i;
-                $name = $names[$i - 1];
+            foreach ($names as $idx => $name) {
 
-                if (!isset($v[$ch])) continue;
+                $channel = $key.$idx;
 
-                $raw = $v[$ch];
+                if (!isset($v[$channel])) {
+                    continue;
+                }
+
+                $x = $v[$channel];
+                $value = ($x > 0) ? ((0.5 * $x) - 430.0) : 0;
+
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => round($value, 3)
+                ]);
+            }
+
+            return $result;
+
+        } catch (\Throwable $e) {
+            Log::error("Sensor SR05 error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+    }
+
+    private function handleSr05O(string $key, array $data, array $sensorKeys): Collection {
+
+        try {
+
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
+
+            $result = collect();
+
+            foreach ($names as $idx => $name) {
+
+                $channel = $key.$idx;
+
+                if (!isset($v[$channel])) {
+                    continue;
+                }
+
+                $x = $v[$channel];
+                $value = ($x > 0) ? ($x - 430.0) : 0;
+
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => round($value, 3)
+                ]);
+            }
+
+            return $result;
+
+        } catch (\Throwable $e) {
+            Log::error("Sensor SR05O error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+    }
+
+
+
+    private function handleWsrSdi(string $key, array $data, array $sensorKeys): Collection {
+
+        try {
+
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
+
+            $result = collect();
+
+            foreach ($names as $idx => $name) {
+
+                $channel = $key.$idx;
+
+                if (!isset($v[$channel])) {
+                    continue;
+                }
+
+                $raw = $v[$channel];
 
                 if ($raw === 'OPEN') {
-                    $result->push(['name' => $name, 'ts' => $ts, 'value' => -100]);
+                    $result->push([
+                        'name'  => $name,
+                        'ts'    => $ts,
+                        'value' => -100
+                    ]);
                     continue;
                 }
 
-                // Temperatura (X1)
-                if ($i === 1) {
+                // X1 → Temperatura
+                if ($idx === 1) {
+
                     $value = floatval(str_replace('F', '', $raw));
                     $tempC = ($value - 32) * 5 / 9;
-                    $result->push(['name' => $name, 'ts' => $ts, 'value' => round($tempC, 2)]);
+
+                    $result->push([
+                        'name'  => $name,
+                        'ts'    => $ts,
+                        'value' => round($tempC, 2)
+                    ]);
+
                     continue;
                 }
 
-                // Potencial matricial (X2..X4)
+                // X2..X4 → Potencial matricial
                 $value = str_replace(['C', 'B'], '', $raw);
-                $value = floatval($value) * -1; // siempre negativo
+                $value = floatval($value) * -1;
 
-                $result->push(['name' => $name, 'ts' => $ts, 'value' => $value]);
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $value
+                ]);
             }
 
             return $result;
+
         } catch (\Throwable $e) {
-            \Log::error("Sensor TER11/12 error at key {$key}: " . $e->getMessage());
+            Log::error("Sensor WsrSdi error at key {$key}: " . $e->getMessage());
             return collect();
         }
-
     }
 
     private function handleCNT(string $key, array $data, array $sensorKeys): Collection{
@@ -772,81 +1120,469 @@ class DatabaseService
 
             return $result;
         } catch (\Throwable $e) {
-            \Log::error("Sensor TER11/12 error at key {$key}: " . $e->getMessage());
+            Log::error("Sensor TER11/12 error at key {$key}: " . $e->getMessage());
             return collect();
         }
 
     }
 
     private function handleDD(string $key, array $data, array $sensorKeys): Collection {
+
         try {
+
             $ts = $data['ts'];
-            $v  = array_values($data['values']);
+            $v  = $data['values'];
             $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
 
             $result = collect();
 
-            foreach ($names as $i => $name) {
-                if (isset($v[$i])) {
+            foreach ($names as $idx => $name) {
+
+                $channel = $key.$idx;
+
+                if (!isset($v[$channel])) {
+                    continue;
+                }
+
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $v[$channel],
+                ]);
+            }
+
+            return $result;
+
+        } catch (\Throwable $e) {
+            Log::error("Sensor handleDD error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+    }
+
+    private function handleVp3(string $key, array $data, array $sensorKeys): Collection {
+
+        try {
+
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
+
+            $result = collect();
+
+            foreach ($names as $idx => $name) {
+
+                $channel = $key.$idx;
+                $value = null;
+
+                switch ($idx) {
+
+                    // Y1: Presión vapor
+                    case 1:
+                        if (isset($v[$channel])) {
+                            $value = $v[$channel];
+                        }
+                        break;
+
+                    // Y2: Temperatura
+                    case 2:
+                        if (isset($v[$channel])) {
+                            $value = $v[$channel];
+                        }
+                        break;
+
+                    // Y3: Humedad %
+                    case 3:
+                        if (isset($v[$channel])) {
+                            $value = $v[$channel] * 100;
+                        }
+                        break;
+
+                    // Y4: DPV
+                    case 4:
+
+                        $ch1 = $key.'1';
+                        $ch2 = $key.'2';
+
+                        if (isset($v[$ch1], $v[$ch2])) {
+
+                            $temp = $v[$ch2];
+                            $pvsat = (1 + sqrt(2) * sin(($temp * 3.1416) / (180 * 3)));
+                            $dpv   = (pow($pvsat, 8.827) * 0.6107) - $v[$ch1];
+
+                            $value = round($dpv, 3);
+                        }
+
+                        break;
+                }
+
+                if ($value !== null) {
                     $result->push([
                         'name'  => $name,
                         'ts'    => $ts,
-                        'value' => $v[$i],
+                        'value' => $value
                     ]);
                 }
             }
 
             return $result;
+
         } catch (\Throwable $e) {
-            \Log::error("Sensor handleDD error at key {$key}: " . $e->getMessage());
+            Log::error("Sensor VP3 error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+    }
+
+    private function handleWMARK1(string $key, array $data, array $sensorKeys): Collection
+    {
+        try {
+
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? null;
+
+            if (!$names) return collect();
+
+            $result = collect();
+
+            foreach ($names as $idx => $name) {
+                $channel = $key . $idx;
+
+                if (!isset($v[$channel])) {
+                    continue;
+                }
+
+                if (($idx == 6 || $idx == 7) && $v[$channel] <= 0) {
+                    continue;
+                }
+
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $v[$channel],
+                ]);
+            }
+
+            return $result;
+
+        } catch (\Throwable $e) {
+            Log::error("Sensor WMARK1 error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+    }
+
+    private function handleGl20m(string $key, array $data, array $sensorKeys): Collection
+    {
+        try {
+
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
+
+            $result = collect();
+
+            foreach ($names as $idx => $name) {
+
+                $channel = $key.$idx;
+
+                if (!isset($v[$channel])) continue;
+
+                $x = $v[$channel];
+
+                $value = ($x < 0) ? 0 : (0.0125 * $x - 5);
+
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $value
+                ]);
+            }
+
+            return $result;
+
+        } catch (\Throwable $e) {
+            Log::error("Sensor GL20M error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+    }
+
+   private function handleGl120m(string $key, array $data, array $sensorKeys): Collection
+    {
+        try {
+
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
+
+            $result = collect();
+
+            foreach ($names as $idx => $name) {
+
+                $channel = $key.$idx;
+
+                if (!isset($v[$channel])) continue;
+
+                $x = $v[$channel];
+
+                $value = ($x < 0) ? 0 : (0.075 * $x - 30);
+
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $value
+                ]);
+            }
+
+            return $result;
+
+        } catch (\Throwable $e) {
+            Log::error("Sensor GL120M error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+    }
+
+    private function handleHaoshiPh(string $key, array $data, array $sensorKeys): Collection
+    {
+        try {
+
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
+
+            $result = collect();
+
+            foreach ($names as $idx => $name) {
+
+                $channel = $key.$idx;
+
+                if (!isset($v[$channel])) continue;
+
+                $x = $v[$channel];
+
+                $value = ($x < 0) ? 0 : (-8.08 + (7.89 * $x / 1000.0));
+
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $value
+                ]);
+            }
+
+            return $result;
+
+        } catch (\Throwable $e) {
+            Log::error("Sensor HAOSHI_PH error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+    }
+
+   private function handleCas40d(string $key, array $data, array $sensorKeys): Collection
+    {
+        try {
+
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
+
+            $result = collect();
+
+            foreach ($names as $idx => $name) {
+
+                $channel = $key.$idx;
+
+                if (!isset($v[$channel])) {
+                    continue;
+                }
+
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $v[$channel]
+                ]);
+            }
+
+            return $result;
+
+        } catch (\Throwable $e) {
+            Log::error("Sensor CAS40D-PH error at key {$key}: " . $e->getMessage());
             return collect();
         }
     }
 
 
-    private function handleVp3(string $key, array $data, array $sensorKeys): Collection{
-        try{
+    private function handleTyp83(string $key, array $data, array $sensorKeys): Collection
+    {
+        try {
+
             $ts = $data['ts'];
             $v  = $data['values'];
-            $names = $sensorKeys[$key] ?? null;
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
 
             $result = collect();
 
-            $ch1 = $key . '1';
-            $ch2 = $key . '2';
-            $ch3 = $key . '3';
-            $ch4 = $key . '4';
+            foreach ($names as $idx => $name) {
 
-            // Y1: Presión vapor
-            if (isset($v[$ch1]) && isset($names[0])) {
-                $result->push(['name' => $names[0], 'ts' => $ts, 'value' => $v[$ch1]]);
-            }
+                $channel = $key.$idx;
 
-            // Y2: Temperatura
-            if (isset($v[$ch2]) && isset($names[1])) {
-                $result->push(['name' => $names[1], 'ts' => $ts, 'value' => $v[$ch2]]);
-            }
+                if (!isset($v[$channel])) continue;
 
-            // Y3: Humedad %
-            if (isset($v[$ch3]) && isset($names[2])) {
-                $result->push(['name' => $names[2], 'ts' => $ts, 'value' => $v[$ch3] * 100]);
-            }
+                $x = $v[$channel];
+                $y = max($x * 0.2, 400);
 
-            // Y4: DPV
-            if (isset($v[$ch1], $v[$ch2])) {
-                $temp = $v[$ch2];
-                $pvsat = (1 + sqrt(2) * sin(($temp * 3.1416) / (180 * 3)));
-                $dpv   = (pow($pvsat, 8.827) * 0.6107) - $v[$ch1];
-
-                $result->push(['name' => $names[3], 'ts' => $ts, 'value' => round($dpv, 3)]);
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $y
+                ]);
             }
 
             return $result;
+
         } catch (\Throwable $e) {
-            \Log::error("Sensor TER11/12 error at key {$key}: " . $e->getMessage());
+            Log::error("Sensor TYP8.3 error at key {$key}: " . $e->getMessage());
             return collect();
         }
+    }
 
+   private function handleGs3(string $key, array $data, array $sensorKeys): Collection
+    {
+        try {
+
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
+
+            $result = collect();
+
+            foreach ($names as $idx => $name) {
+
+                $channel = $key.$idx;
+
+                if (!isset($v[$channel])) continue;
+
+                $value = null;
+
+                switch ($idx) {
+
+                    // Y1 humedad volumétrica
+                    case 1:
+                        $x = $v[$channel];
+                        $value = ((0.18 * sqrt($x)) - 0.117) * 100;
+                        break;
+
+                    // Y2 temperatura suelo
+                    case 2:
+                        $value = $v[$channel];
+                        break;
+
+                    // Y3 conductividad
+                    case 3:
+                        $value = $v[$channel];
+                        break;
+                }
+
+                if ($value !== null) {
+                    $result->push([
+                        'name'  => $name,
+                        'ts'    => $ts,
+                        'value' => $value
+                    ]);
+                }
+            }
+
+            return $result;
+
+        } catch (\Throwable $e) {
+            Log::error("Sensor GS-3 error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+    }
+
+    private function handlePresostato01mp(string $key, array $data, array $sensorKeys): Collection
+    {
+        try {
+
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
+
+            $result = collect();
+
+            foreach ($names as $idx => $name) {
+
+                $channel = $key.$idx;
+
+                if (!isset($v[$channel])) continue;
+
+                $x = $v[$channel];
+                $y = 0.625 * $x + 250;
+
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $y
+                ]);
+            }
+
+            return $result;
+
+        } catch (\Throwable $e) {
+            Log::error("Sensor presostato_0_1MP error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+    }
+
+    private function handlePresostato016mp(string $key, array $data, array $sensorKeys): Collection
+    {
+        try {
+
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
+
+            $result = collect();
+
+            foreach ($names as $idx => $name) {
+
+                $channel = $key.$idx;
+
+                if (!isset($v[$channel])) continue;
+
+                $x = $v[$channel];
+                $y = $x - 400;
+
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $y
+                ]);
+            }
+
+            return $result;
+
+        } catch (\Throwable $e) {
+            Log::error("Sensor presostato_0_1.6MP error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
     }
 
 }

@@ -31,6 +31,7 @@ class LogRequests
 
         $parsing_data=$this->databaseService->dataParsing($token, $request->all());
 
+        dd($parsing_data);
         $data = [
             'headers' => $request->headers->all(),
             'token' => $request->segment(3),

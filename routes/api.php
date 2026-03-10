@@ -3,7 +3,7 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ApiRequestController;
-use App\Controller\DatabaseController;
+use App\Http\Controllers\DatabaseController;
 
 Route::get('/device', [DatabaseController::class, 'getDevice']);
 
