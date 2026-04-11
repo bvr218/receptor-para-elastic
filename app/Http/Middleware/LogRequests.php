@@ -46,6 +46,7 @@ class LogRequests
             'user_agent' => $request->header('User-Agent')
         ];
 
+        // dd($parsing_data);
         $this->elasticsearchService->indexRequest($data);
 
         return response()->json(['message' => 'Request capturada'], 200);

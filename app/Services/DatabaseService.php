@@ -73,8 +73,16 @@ class DatabaseService
         'GS-3' => 'handleGs3',
         'GS3' => 'handleGs3',
 
+        'CTDDG' => 'handleCTDDG',
+
         'presostato_0_1MP' => 'handlePresostato01mp',
         'presostato_0_1.6MP' => 'handlePresostato016mp',
+
+        'GPLPTS' => 'handleGPLPTS',
+        '3910.1' => 'handle39101',
+        '056012' => 'handle056012',
+        'ACHSDI' => 'handleACHSDI',
+        'GERBIL' => 'handleGERBIL',
 
         #config server pulse
         'caudal_agri' => 'handlePulseSensor',
@@ -302,6 +310,7 @@ class DatabaseService
         try {
 
             $device = $this->getDeviceByToken($token);
+
             if (!$device) {
                 return [];
             }
@@ -342,7 +351,7 @@ class DatabaseService
                 }
 
                 $stageCalculated = $this->processSensorStage($types, $keys, $data, $stage['name']);
-
+                dd($stage);
                 if (!empty($stageCalculated)) {
                     $allCalculated = array_merge_recursive($allCalculated, $stageCalculated);
                 }
@@ -448,7 +457,8 @@ class DatabaseService
     }
 
     //Calculo de los sensores
-    private function handleTER21(string $key, array $data, array $sensorKeys): Collection{
+    private function handleTER21(string $key, array $data, array $sensorKeys): Collection
+    {
         try{
             $ts = $data['ts'];
             $v= $data['values'];
@@ -479,7 +489,8 @@ class DatabaseService
 
     }
 
-    private function handleTER12andTER11(string $key, array $data, array $sensorKeys): Collection {
+    private function handleTER12andTER11(string $key, array $data, array $sensorKeys): Collection
+    {
         try {
 
         $ts = $data['ts'];
@@ -549,7 +560,8 @@ class DatabaseService
 
     }
 
-    private function handleTr315(string $key, array $data, array $sensorKeys): Collection {
+    private function handleTr315(string $key, array $data, array $sensorKeys): Collection
+    {
         try {
 
             $ts = $data['ts'];
@@ -641,7 +653,8 @@ class DatabaseService
     }
 
 
-    private function handleEp100G(string $key, array $data, array $sensorKeys): Collection{
+    private function handleEp100G(string $key, array $data, array $sensorKeys): Collection
+    {
        try {
 
             $ts = $data['ts'];
@@ -675,9 +688,9 @@ class DatabaseService
 
     }
 
-
     #mantiene los mismos valores
-    private function handleEs2(string $key, array $data, array $sensorKeys): Collection{
+    private function handleEs2(string $key, array $data, array $sensorKeys): Collection
+    {
 
         try {
 
@@ -718,7 +731,8 @@ class DatabaseService
         return $this->handleEs2($key, $data, $sensorKeys);
     }
 
-    private function handleEs2Conductivity(string $key, array $data, array $sensorKeys): Collection {
+    private function handleEs2Conductivity(string $key, array $data, array $sensorKeys): Collection
+    {
 
         try {
 
@@ -753,7 +767,8 @@ class DatabaseService
         }
     }
 
-    private function handle5te(string $key, array $data, array $sensorKeys): Collection {
+    private function handle5te(string $key, array $data, array $sensorKeys): Collection
+    {
 
         try {
 
@@ -812,8 +827,8 @@ class DatabaseService
         }
     }
 
-   private function handleVp4(string $key, array $data, array $sensorKeys): Collection {
-
+   private function handleVp4(string $key, array $data, array $sensorKeys): Collection
+    {
         try {
 
             $ts = $data['ts'];
@@ -897,7 +912,8 @@ class DatabaseService
         }
     }
 
-    private function handleAtm22(string $key, array $data, array $sensorKeys): Collection {
+    private function handleAtm22(string $key, array $data, array $sensorKeys): Collection
+    {
 
         try {
 
@@ -959,7 +975,8 @@ class DatabaseService
         }
     }
 
-    private function handleSr05(string $key, array $data, array $sensorKeys): Collection {
+    private function handleSr05(string $key, array $data, array $sensorKeys): Collection
+    {
 
         try {
 
@@ -997,7 +1014,8 @@ class DatabaseService
         }
     }
 
-    private function handleSr05O(string $key, array $data, array $sensorKeys): Collection {
+    private function handleSr05O(string $key, array $data, array $sensorKeys): Collection
+    {
 
         try {
 
@@ -1035,9 +1053,8 @@ class DatabaseService
         }
     }
 
-
-
-    private function handleWsrSdi(string $key, array $data, array $sensorKeys): Collection {
+    private function handleWsrSdi(string $key, array $data, array $sensorKeys): Collection
+    {
 
         try {
 
@@ -1102,7 +1119,8 @@ class DatabaseService
         }
     }
 
-    private function handleCNT(string $key, array $data, array $sensorKeys): Collection{
+    private function handleCNT(string $key, array $data, array $sensorKeys): Collection
+    {
         try{
             $ts = $data['ts'];
             $v  = $data['values'];
@@ -1126,7 +1144,8 @@ class DatabaseService
 
     }
 
-    private function handleDD(string $key, array $data, array $sensorKeys): Collection {
+    private function handleDD(string $key, array $data, array $sensorKeys): Collection
+    {
 
         try {
 
@@ -1161,7 +1180,8 @@ class DatabaseService
         }
     }
 
-    private function handleVp3(string $key, array $data, array $sensorKeys): Collection {
+    private function handleVp3(string $key, array $data, array $sensorKeys): Collection
+    {
 
         try {
 
@@ -1311,7 +1331,8 @@ class DatabaseService
         }
     }
 
-   private function handleGl120m(string $key, array $data, array $sensorKeys): Collection
+
+    private function handleGl120m(string $key, array $data, array $sensorKeys): Collection
     {
         try {
 
@@ -1385,7 +1406,8 @@ class DatabaseService
         }
     }
 
-   private function handleCas40d(string $key, array $data, array $sensorKeys): Collection
+
+    private function handleCas40d(string $key, array $data, array $sensorKeys): Collection
     {
         try {
 
@@ -1419,7 +1441,6 @@ class DatabaseService
             return collect();
         }
     }
-
 
     private function handleTyp83(string $key, array $data, array $sensorKeys): Collection
     {
@@ -1457,7 +1478,7 @@ class DatabaseService
         }
     }
 
-   private function handleGs3(string $key, array $data, array $sensorKeys): Collection
+    private function handleGs3(string $key, array $data, array $sensorKeys): Collection
     {
         try {
 
@@ -1581,6 +1602,219 @@ class DatabaseService
 
         } catch (\Throwable $e) {
             Log::error("Sensor presostato_0_1.6MP error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+    }
+
+    private function handleCTDDG(string $key, array $data, array $sensorKeys): Collection
+    {
+        try {
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
+
+            $result = collect();
+
+            foreach ($names as $idx => $name) {
+
+                $channel = $key . $idx;
+
+                if (!isset($v[$channel])) {
+                    continue;
+                }
+
+                $value = null;
+
+                switch ($idx) {
+
+                    case 1:
+                        $x1 = $v[$channel];
+                        $value = $x1 / 1000;
+                    break;
+
+                    case 2:
+                        $value = $v[$channel];
+                        break;
+
+                    case 3:
+                        $x3 = $v[$channel];
+                        // $value = $x3 / 1000;
+                        $value = $x3 ; #ya se multiplica en 4egrowth
+
+                        break;
+
+                    case 4:
+                        $x1 = $v[$key . '1'] ?? null;
+                        $value = $x1 !== null ? (0.2 * $x1) : null;
+                        break;
+            }
+
+            if ($value !== null) {
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $value
+                ]);
+            }
+            }
+
+            return $result;
+
+        } catch (\Throwable $e) {
+            Log::error("Sensor CTDDG error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+    }
+
+    private function handleGPLPTS(string $key, array $data, array $sensorKeys): Collection
+    {
+        try {
+
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
+
+            $result = collect();
+
+            foreach ($names as $idx => $name) {
+
+                $channel = $key . $idx;
+
+                if (!isset($v[$channel])) continue;
+
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $v[$channel]
+                ]);
+            }
+
+            return $result;
+
+        } catch (\Throwable $e) {
+            Log::error("Sensor GPLPTS error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+    }
+
+    private function handle39101(string $key, array $data, array $sensorKeys): Collection
+    {
+        try {
+
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
+
+            $result = collect();
+
+            foreach ($names as $idx => $name) {
+
+                $channel = $key . $idx;
+
+                if (!isset($v[$channel])) continue;
+
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $v[$channel]
+                ]);
+            }
+
+            return $result;
+
+        } catch (\Throwable $e) {
+            Log::error("Sensor 3910.1 error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+    }
+
+    private function handle056012(string $key, array $data, array $sensorKeys): Collection
+    {
+        try {
+
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
+
+            $result = collect();
+
+            foreach ($names as $idx => $name) {
+
+                $channel = $key . $idx;
+
+                if (!isset($v[$channel])) continue;
+
+                $value = null;
+
+                switch ($idx) {
+
+                    case 1: // humedad
+                        $value = $v[$channel];
+                        break;
+
+                    case 2: // conductividad
+                        $value = $v[$channel];
+                        break;
+
+                    case 3: // temperatura
+                        $value = $v[$channel];
+                        break;
+                }
+
+                if ($value !== null) {
+                    $result->push([
+                        'name'  => $name,
+                        'ts'    => $ts,
+                        'value' => $value
+                    ]);
+                }
+            }
+
+            return $result;
+
+        } catch (\Throwable $e) {
+            Log::error("Sensor 056012 error at key {$key}: " . $e->getMessage());
+            return collect();
+        }
+    }
+
+    private function handleACHSDI(string $key, array $data, array $sensorKeys): Collection
+    {
+        try {
+
+            $ts = $data['ts'];
+            $v  = $data['values'];
+            $names = $sensorKeys[$key] ?? [];
+
+            if (empty($names)) return collect();
+
+            $result = collect();
+
+            foreach ($names as $idx => $name) {
+
+                $channel = $key . $idx;
+
+                if (!isset($v[$channel])) continue;
+
+                $result->push([
+                    'name'  => $name,
+                    'ts'    => $ts,
+                    'value' => $v[$channel]
+                ]);
+            }
+
+            return $result;
+
+        } catch (\Throwable $e) {
+            Log::error("Sensor ACHSDI error at key {$key}: " . $e->getMessage());
             return collect();
         }
     }
